@@ -182,7 +182,7 @@ bash examples/rnaseq_airway/fetch_example_data.sh
 python examples/rnaseq_airway/run_airway_demo.py
 ```
 
-完整中文说明见 [examples/rnaseq_airway/README_ZH.md](examples/rnaseq_airway/README_ZH.md)。报告、结果表和图件写入 `data/rnaseq_airway_example/output/`。
+完整运行说明见 [examples/rnaseq_airway/README_ZH.md](examples/rnaseq_airway/README_ZH.md)；零基础概念说明见 [examples/rnaseq_airway/README_零基础.md](examples/rnaseq_airway/README_%E9%9B%B6%E5%9F%BA%E7%A1%80.md)。报告、结果表和图件写入 `data/rnaseq_airway_example/output/`。
 
 ## 📊 Research Dashboard（实时研究看板）
 

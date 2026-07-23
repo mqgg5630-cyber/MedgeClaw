@@ -2,6 +2,8 @@
 
 这个目录提供一个可以从公开数据开始跑通的 bulk RNA-seq 差异表达示例。它不依赖 OpenClaw、Docker 或模型 API；只需要 Git、Python 和网络即可验证分析主线。
 
+如果你第一次接触 RNA-seq，先阅读：[零基础读懂 RNA-seq 差异表达分析](README_零基础.md)。
+
 完整报告会生成到：
 
 ```text
