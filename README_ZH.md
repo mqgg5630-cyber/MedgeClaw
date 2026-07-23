@@ -170,6 +170,20 @@ OpenClaw 启动后，直接发送消息：
 
 ---
 
+## 🧪 可复现 RNA-seq 示例
+
+仓库提供一个从公开 airway 数据集开始的完整 bulk RNA-seq 差异表达示例，不依赖 OpenClaw、Docker 或模型 API，可先验证分析主线：
+
+```bash
+python3 -m venv "$HOME/.venvs/medgeclaw-rnaseq"
+source "$HOME/.venvs/medgeclaw-rnaseq/bin/activate"
+python -m pip install -r examples/rnaseq_airway/requirements.txt
+bash examples/rnaseq_airway/fetch_example_data.sh
+python examples/rnaseq_airway/run_airway_demo.py
+```
+
+完整中文说明见 [examples/rnaseq_airway/README_ZH.md](examples/rnaseq_airway/README_ZH.md)。报告、结果表和图件写入 `data/rnaseq_airway_example/output/`。
+
 ## 📊 Research Dashboard（实时研究看板）
 
 每次分析任务自动生成一个**实时 Web 看板** —— 不用等任务跑完，不用翻日志。
