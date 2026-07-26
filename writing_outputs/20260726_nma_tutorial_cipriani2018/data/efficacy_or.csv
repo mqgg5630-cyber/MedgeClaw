@@ -1,0 +1,22 @@
+drug_en,drug_zh,class_zh,or_efficacy,or_acceptability
+amitriptyline,阿米替林,三环类 TCA,2.13,1.14
+mirtazapine,米氮平,其他,1.89,1.03
+duloxetine,度洛西汀,SNRI,1.85,1.09
+venlafaxine,文拉法辛,SNRI,1.78,1.07
+paroxetine,帕罗西汀,SSRI,1.75,1.02
+milnacipran,米那普仑,SNRI,1.74,1.06
+fluvoxamine,氟伏沙明,SSRI,1.69,1.15
+escitalopram,艾司西酞普兰,SSRI,1.68,0.94
+nefazodone,奈法唑酮,其他,1.67,1.10
+sertraline,舍曲林,SSRI,1.67,0.96
+vortioxetine,伏硫西汀,其他,1.66,0.98
+agomelatine,阿戈美拉汀,其他,1.65,0.84
+vilazodone,维拉佐酮,其他,1.60,1.20
+levomilnacipran,左旋米那普仑,SNRI,1.59,1.11
+bupropion,安非他酮,其他,1.58,1.01
+fluoxetine,氟西汀,SSRI,1.52,0.88
+citalopram,西酞普兰,SSRI,1.52,0.94
+trazodone,曲唑酮,其他,1.51,1.16
+clomipramine,氯米帕明,三环类 TCA,1.49,1.30
+desvenlafaxine,去甲文拉法辛,SNRI,1.49,1.08
+reboxetine,瑞波西汀,其他,1.37,1.16
