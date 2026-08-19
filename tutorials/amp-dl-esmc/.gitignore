@@ -1,0 +1,9 @@
+outputs/
+.cache/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+legacy_framework/
