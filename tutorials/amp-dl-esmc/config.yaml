@@ -1,7 +1,6 @@
-# ============================================================
 # AMP 深度学习肽预测 — 端到端配置
-# 优先 ESM-C 提特征；不可用时自动回退 ESM-2 / 手工特征
-# ============================================================
+# 优先 ESM-C；不可用自动回退 ESM-2 / handcrafted
+# 无 torch 时自动跳过 MLP，只跑经典 ML
 
 project:
   name: amp-dl-esmc
@@ -10,16 +9,12 @@ project:
   cache_dir: .cache
 
 data:
-  # 演示数据（仓库自带，可直接跑通）
   train_csv: data/demo/train.csv
   test_csv: data/demo/test.csv
-  # 列名
   seq_col: sequence
   label_col: label
-  # 肽长过滤（AA）
   min_len: 5
   max_len: 60
-  # 合法氨基酸
   alphabet: ACDEFGHIKLMNPQRSTVWY
 
 split:
@@ -27,10 +22,6 @@ split:
   val_size: 0.1
   stratify: true
 
-# ---------- 特征后端（按优先级尝试）----------
-# esmc  : EvolutionaryScale ESM-C（推荐，2024-12 表征模型）
-# esm2  : Meta fair-esm ESM-2（学界 AMP 论文最常用基线）
-# handcrafted : AAC + 二肽 + 理化性质（无 GPU / 无权重也能跑）
 features:
   backend: auto          # auto | esmc | esm2 | handcrafted
   pooling: mean          # mean | cls | mean+max
@@ -39,29 +30,23 @@ features:
   device: auto           # auto | cuda | cpu
 
   esmc:
-    # 本地开源权重名（pip install esm）
-    model_name: esmc_300m          # esmc_300m | esmc_600m
-    # 也可走 Forge/Biohub API（需 token）
+    model_name: esmc_300m
     use_api: false
     api_model: esmc-300m-2024-12
     api_url: https://forge.evolutionaryscale.ai
-    # api_token 优先读环境变量 ESM_API_KEY / FORGE_API_TOKEN
 
   esm2:
-    # fair-esm 模型名
-    model_name: esm2_t12_35M_UR50D   # 小模型便于 CPU；有 GPU 可改 t33_650M
-    repr_layer: 12                   # 与模型层数一致（35M→12, 150M→30, 650M→33）
+    model_name: esm2_t12_35M_UR50D
+    repr_layer: 12
 
 model:
-  # 经典 ML（ESM 均值向量上）
   classical:
     - logistic
     - random_forest
-    - xgboost_like   # 无 xgboost 时用 HistGradientBoosting 代替
-  # 简单深度学习头（可选）
+    - xgboost_like
   dl:
-    enabled: true
-    type: mlp          # mlp | cnn_lstm（需要 per-residue，当前 demo 用 mean→mlp）
+    enabled: true        # torch 缺失时脚本会自动 skip
+    type: mlp
     hidden: [256, 64]
     dropout: 0.3
     epochs: 40
@@ -75,6 +60,5 @@ train:
   metrics: [accuracy, precision, recall, f1, roc_auc, mcc]
 
 predict:
-  # 预测时的默认输入
   input_fasta: data/demo/to_predict.fasta
   threshold: 0.5

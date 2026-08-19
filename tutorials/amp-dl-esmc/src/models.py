@@ -1,4 +1,4 @@
-"""Classical ML + small MLP head on frozen ESM embeddings."""
+"""Classical ML + optional small MLP head on frozen embeddings."""
 
 from __future__ import annotations
 
@@ -43,20 +43,27 @@ def make_classical(name: str, seed: int = 42) -> Pipeline:
     elif name == "random_forest":
         clf = RandomForestClassifier(
             n_estimators=300,
-            max_depth=None,
-            min_samples_leaf=1,
             class_weight="balanced_subsample",
             random_state=seed,
             n_jobs=-1,
         )
     elif name in ("xgboost_like", "hist_gbm", "gbm"):
-        clf = HistGradientBoostingClassifier(
-            max_depth=6,
-            learning_rate=0.08,
-            max_iter=200,
-            random_state=seed,
-            class_weight="balanced",
-        )
+        # sklearn>=1.2 supports class_weight on HGBM; older: omit
+        try:
+            clf = HistGradientBoostingClassifier(
+                max_depth=6,
+                learning_rate=0.08,
+                max_iter=200,
+                random_state=seed,
+                class_weight="balanced",
+            )
+        except TypeError:
+            clf = HistGradientBoostingClassifier(
+                max_depth=6,
+                learning_rate=0.08,
+                max_iter=200,
+                random_state=seed,
+            )
     else:
         raise ValueError(f"unknown classical model: {name}")
     return Pipeline([("scaler", StandardScaler()), ("clf", clf)])
@@ -69,16 +76,22 @@ def cv_evaluate(
     folds: int = 5,
     seed: int = 42,
 ) -> tuple[dict[str, float], np.ndarray]:
-    skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
-    # probability via cross_val_predict
+    skf = StratifiedKFold(n_splits=min(folds, max(2, int(np.min(np.bincount(y))))), shuffle=True, random_state=seed)
     try:
         proba = cross_val_predict(model, X, y, cv=skf, method="predict_proba", n_jobs=-1)[:, 1]
     except Exception:
-        # some models may not support predict_proba in older sklearn paths
         pred = cross_val_predict(model, X, y, cv=skf, n_jobs=-1)
         proba = pred.astype(float)
-    metrics = compute_metrics(y, proba)
-    return metrics, proba
+    return compute_metrics(y, proba), proba
+
+
+def torch_available() -> bool:
+    try:
+        import torch  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 @dataclass
@@ -95,9 +108,11 @@ class MLPConfig:
 
 
 class EmbeddingMLP:
-    """Small MLP on frozen sequence embeddings."""
+    """Small MLP on frozen sequence embeddings. Requires torch."""
 
     def __init__(self, in_dim: int, cfg: MLPConfig):
+        if not torch_available():
+            raise ImportError("torch is required for EmbeddingMLP")
         import torch
         import torch.nn as nn
 
@@ -199,5 +214,4 @@ class EmbeddingMLP:
             "scaler_mean": self.scaler_mean_,
             "scaler_std": self.scaler_std_,
             "state": {k: v.detach().cpu().numpy() for k, v in self.net.state_dict().items()},
-            "in_dim": int(next(self.net.parameters()).shape[1]) if list(self.net.parameters()) else None,
         }

@@ -17,15 +17,14 @@ sys.path.insert(0, str(ROOT))
 
 from src.data import load_fasta  # noqa: E402
 from src.features import extract_features  # noqa: E402
-from src.models import EmbeddingMLP, MLPConfig  # noqa: E402
+from src.models import EmbeddingMLP, MLPConfig, torch_available  # noqa: E402
 from src.utils import ensure_dir, load_config, resolve_device, set_seed  # noqa: E402
 
 
 def load_best_model(model_dir: Path):
     best = (model_dir / "BEST_MODEL.txt").read_text(encoding="utf-8").strip()
     if best == "mlp":
-        blob = joblib.load(model_dir / "mlp.joblib")
-        return best, blob
+        return best, joblib.load(model_dir / "mlp.joblib")
     path = model_dir / f"{best}.joblib"
     if not path.exists():
         path = model_dir / "best_model.joblib"
@@ -34,18 +33,18 @@ def load_best_model(model_dir: Path):
 
 def predict_with(name: str, bundle, X: np.ndarray) -> np.ndarray:
     if name == "mlp":
+        if not torch_available():
+            raise RuntimeError("best model is mlp but torch is missing")
+        import torch
+
         cfg = MLPConfig(**bundle["cfg"])
-        # rebuild
         state = bundle["bundle"]
         mlp = EmbeddingMLP(X.shape[1], cfg)
         mlp.scaler_mean_ = state["scaler_mean"]
         mlp.scaler_std_ = state["scaler_std"]
-        import torch
-
         sd = {k: torch.tensor(v) for k, v in state["state"].items()}
         mlp.net.load_state_dict(sd)
         return mlp.predict_proba(X)
-    # sklearn pipeline
     if hasattr(bundle, "predict_proba"):
         return bundle.predict_proba(X)[:, 1]
     return bundle.predict(X).astype(float)
@@ -63,7 +62,12 @@ def main() -> int:
     thr = args.threshold if args.threshold is not None else cfg["predict"]["threshold"]
 
     model_dir = Path(cfg["project"]["output_dir"]) / "models"
-    feat_meta = json.loads((Path(cfg["project"]["output_dir"]) / "features" / "feature_meta.json").read_text(encoding="utf-8"))
+    feat_meta_path = Path(cfg["project"]["output_dir"]) / "features" / "feature_meta.json"
+    if not feat_meta_path.exists() or not (model_dir / "BEST_MODEL.txt").exists():
+        print("run train pipeline first (01→03)")
+        return 1
+
+    feat_meta = json.loads(feat_meta_path.read_text(encoding="utf-8"))
     backend = feat_meta["backend_used"]
     device = resolve_device(cfg["features"]["device"])
 
@@ -71,7 +75,7 @@ def main() -> int:
     print(f"[predict] n={len(df)} backend={backend} device={device}")
 
     fcfg = cfg["features"]
-    X, used, meta = extract_features(
+    X, used, _meta = extract_features(
         df["sequence"].tolist(),
         backend=backend,
         device=device,

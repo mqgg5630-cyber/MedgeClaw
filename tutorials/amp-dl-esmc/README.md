@@ -12,9 +12,21 @@
 |------|------|
 | 现在提特征用啥？ | **优先 ESM-C**（`esmc_300m` / `esmc_600m`）。AMP 文献里仍大量用 **ESM-2** 作基线。 |
 | ESM3 呢？ | **生成 / 多模态设计**（序列+结构+功能），不是第一选择的「分类 embedding 工具」。 |
-| 我该用哪个 conda？ | 优先 **`amp-esm`**；没有就 `amppre` / 新建 `amp-esmc`。 |
-| 没 GPU 能跑吗？ | 能。demo 默认可走 `handcrafted`；ESM-C 300M 在 CPU 上也能跑小数据，只是慢。 |
+| 我该用哪个 conda？ | **纯** `conda activate amp-esm`（Python 3.10–3.12）。不要和 `medgeclaw-rnaseq` venv 叠在一起。 |
+| 没 GPU / 没 torch 能跑吗？ | **能。** 路径 C：`BACKEND=handcrafted` + 经典 ML（不需要 torch/esm）。 |
 | 数据和权重会进 Git 吗？ | 不会。`outputs/`、`.cache/` 已忽略；仓库只带 demo CSV + 代码。 |
+
+### 0.1 你上次自检的结论（对号入座）
+
+```
+Python : 3.14.6  (/home/w24e/.venvs/medgeclaw-rnaseq/bin/python)
+提示符 : (amp-esm) (medgeclaw-rnaseq)   ← 两个环境叠了，venv 抢了 PATH
+缺     : tqdm, torch, esm, Bio, shap
+有     : numpy, pandas, sklearn, matplotlib, seaborn
+```
+
+**问题不是教程坏了，是 Python 指错了。**  
+Python 3.14 + medgeclaw-rnaseq 上装 `torch`/`esm` 很容易失败；先纠正环境，再谈 ESM-C。
 
 ---
 
@@ -106,82 +118,82 @@ bitoxnet
 ...
 ```
 
-### 3.1 激活并自检
+### 3.1 先纠正环境（必做）
 
 ```bash
-cd /home/w24e/projects/MedgeClaw-mqgg   # 若 Arena 已 push，先 git pull
-# git checkout arena/01a0193d-medgeclaw
-# git pull origin arena/01a0193d-medgeclaw
-
+cd /home/w24e/projects/MedgeClaw-mqgg
+git fetch origin && git checkout arena/01a0193d-medgeclaw
+git pull origin arena/01a0193d-medgeclaw
 cd tutorials/amp-dl-esmc
-conda activate amp-esm
 
+# 诊断混用
+bash scripts/fix_env.sh
+
+# 退出所有栈，只留 amp-esm
+deactivate 2>/dev/null || true
+conda deactivate 2>/dev/null || true
+conda deactivate 2>/dev/null || true
+conda activate amp-esm
+hash -r
+which python && python -V
+# 期望: .../miniconda3/envs/amp-esm/bin/python 且 3.10–3.12
+# 若仍是 3.14 或路径含 medgeclaw-rnaseq → 新建 amp-esmc（见下）
+```
+
+**新建干净环境（推荐，一次到位）：**
+
+```bash
+conda create -n amp-esmc python=3.11 -y
+conda activate amp-esmc
+cd /home/w24e/projects/MedgeClaw-mqgg/tutorials/amp-dl-esmc
+python -m pip install -U pip
+python -m pip install -r requirements-minimal.txt
 python scripts/00_check_env.py
 ```
 
-脚本会打印：
+### 3.2 三条可跑路径
 
-- numpy / pandas / sklearn / torch / cuda 是否可用  
-- **ESM-C API 是否可 import**  
-- **ESM-2（fair-esm）是否可 import**  
-- 最终 `SELECTED_BACKEND=esmc|esm2|handcrafted`
+| 路径 | 条件 | 命令 |
+|------|------|------|
+| **C 冒烟** | 仅有 numpy/pandas/sklearn | `BACKEND=handcrafted bash scripts/run_all.sh` |
+| **B ESM-2** | fair-esm + torch，Py≤3.12 | `pip install torch fair-esm` → `BACKEND=esm2 bash scripts/run_all.sh` |
+| **A ESM-C** | `esm` + torch，Py≤3.12 | `pip install torch esm` → `bash scripts/run_all.sh` |
 
-### 3.2 缺什么装什么
-
-```bash
-conda activate amp-esm
-pip install -r requirements.txt
-```
-
-**ESM-C（推荐）**
+现在（你这台机子混用 3.14 时）请先走 **路径 C**，确认流水线；再换干净 conda 上 **路径 A**。
 
 ```bash
-pip install esm
-# 首次本地权重会从 HuggingFace 拉 esmc_300m
-# 若需登录：huggingface-cli login
+# --- 路径 C：当前最小依赖也能跑（不装 torch）---
+python -m pip install -r requirements-minimal.txt
+# 若还在错误的 3.14 上，至少 tqdm 已不再是硬依赖
+BACKEND=handcrafted bash scripts/run_all.sh
+
+# --- 路径 A：在 amp-esmc (3.11) ---
+conda activate amp-esmc
+python -m pip install -r requirements.txt
+# GPU 请按 pytorch.org 换 cu 版本；CPU 可用:
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
+bash scripts/run_all.sh
 ```
 
-**注意 `esm` 包名冲突**
+### 3.3 `esm` 包名冲突
 
 | 包 | import | 用途 |
 |----|--------|------|
-| `esm`（EvolutionaryScale，PyPI） | `from esm.models.esmc import ESMC` | **ESM-C / ESM3** |
-| `fair-esm`（Meta） | `import esm; esm.pretrained...` | **ESM-2** |
+| `esm`（EvolutionaryScale） | `from esm.models.esmc import ESMC` | **ESM-C / ESM3** |
+| `fair-esm`（Meta） | `import esm; esm.pretrained` | **ESM-2** |
 
-两者都叫 `esm`，**不要装在同一环境硬刚**。策略：
+不要同环境混装。`amp-esmc` 专 ESM-C；另建 `amp-esm2` 做文献基线。
 
-- `amp-esm` 专供 EvolutionaryScale（ESM-C）  
-- 另建 `amp-esm2` 装 `fair-esm` 做文献基线  
-- 或本教程 `backend: handcrafted` / `esm2` 按自检结果自动选
+### 3.4 依赖表
 
-**只有 CPU / 先跑通**
-
-```bash
-BACKEND=handcrafted bash scripts/run_all.sh
-# 或
-python scripts/02_extract_features.py --backend handcrafted
-```
-
-**可选 API（无本地 GPU 时）**
-
-```bash
-export ESM_API_KEY=你的_forge_或_biohub_token
-# 然后改 config.yaml:
-# features.esmc.use_api: true
-```
-
-### 3.3 环境对照表（跑完 00 对照）
-
-| 组件 | 必须？ | 没有时 |
-|------|--------|--------|
-| Python 3.10+ | 是 | 换环境 |
-| numpy/pandas/scikit-learn | 是 | `pip install ...` |
-| torch | 建议 | MLP 与 ESM 都需要；纯 sklearn+handcrafted 可改代码去掉 |
-| `esm` (ESM-C) | 推荐 | 回退 ESM-2 / handcrafted |
-| fair-esm | 可选 | 仅 ESM-2 基线 |
-| CUDA GPU | 可选 | CPU 跑 demo；正式训练建议 GPU |
-| shap | 可选 | 跳过 05 |
-| biopython | 可选 | demo 未强依赖 |
+| 组件 | 路径 C | 路径 A (ESM-C) | 没有时 |
+|------|--------|----------------|--------|
+| Python 3.10–3.12 | 建议 | **必须** | 3.14 勿硬装 torch/esm |
+| numpy/pandas/sklearn/pyyaml/joblib | 必须 | 必须 | `pip install -r requirements-minimal.txt` |
+| tqdm | 可选 | 可选 | 内置简易进度条 |
+| torch | 否 | 必须 | 自动 skip MLP |
+| esm (ESM-C) | 否 | 必须 | 回退 esm2/handcrafted |
+| shap/matplotlib | 否 | 可选 | skip 05 |
 
 ---
 
@@ -402,23 +414,33 @@ cp -a /mnt/e/0docx/AMP预测代码框架/peptide_amp_project \
 
 ---
 
-## 11. 命令速查
+## 11. 命令速查（复制即用）
 
 ```bash
-conda activate amp-esm
+cd /home/w24e/projects/MedgeClaw-mqgg
+git pull origin arena/01a0193d-medgeclaw
 cd tutorials/amp-dl-esmc
 
+# 纠正环境
+bash scripts/fix_env.sh
+deactivate 2>/dev/null; conda deactivate 2>/dev/null; conda deactivate 2>/dev/null
+conda activate amp-esm   # 或 amp-esmc
+which python && python -V
+
 python scripts/00_check_env.py
-BACKEND=handcrafted bash scripts/run_all.sh   # 最稳冒烟
-bash scripts/run_all.sh                       # 自动选 ESM-C/2
-python scripts/04_predict.py --fasta data/demo/to_predict.fasta
+python -m pip install -r requirements-minimal.txt
+BACKEND=handcrafted bash scripts/run_all.sh
+
+# 干净 3.11 上 ESM-C：
+# conda activate amp-esmc && pip install -r requirements.txt && bash scripts/run_all.sh
 ```
 
-跑完把下面贴回来，我帮你看环境与指标是否正常：
+把下面贴回来：
 
 ```bash
+which python; python -V
 python scripts/00_check_env.py
-cat outputs/features/feature_meta.json
-cat outputs/models/metrics.csv
-cat outputs/predict/predictions.csv
+cat outputs/features/feature_meta.json 2>/dev/null
+cat outputs/models/metrics.csv 2>/dev/null
+cat outputs/predict/predictions.csv 2>/dev/null
 ```

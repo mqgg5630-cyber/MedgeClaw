@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# 一键跑通 demo（在 amp-esm 或任意装好依赖的环境）
+# 一键跑通。自动容忍缺 torch / 缺 esm。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+PY="${PYTHON:-python}"
+echo "Using: $($PY -c 'import sys; print(sys.executable, sys.version.split()[0])')"
+
 echo "========== 00 check env =========="
-python scripts/00_check_env.py
+$PY scripts/00_check_env.py || true
 
 echo "========== 01 prepare data =========="
-python scripts/01_prepare_data.py
+$PY scripts/01_prepare_data.py
 
 echo "========== 02 extract features =========="
-# 强制手搓特征可： BACKEND=handcrafted bash scripts/run_all.sh
 BACKEND="${BACKEND:-auto}"
-python scripts/02_extract_features.py --backend "$BACKEND"
+$PY scripts/02_extract_features.py --backend "$BACKEND"
 
 echo "========== 03 train =========="
-python scripts/03_train.py
+$PY scripts/03_train.py
 
 echo "========== 04 predict =========="
-python scripts/04_predict.py
+$PY scripts/04_predict.py
 
 echo "========== 05 shap (optional) =========="
-python scripts/05_shap_report.py || true
+$PY scripts/05_shap_report.py || true
 
 echo ""
 echo "All done. See outputs/"

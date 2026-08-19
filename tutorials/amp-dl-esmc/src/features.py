@@ -2,9 +2,9 @@
 Feature backends for AMP peptides.
 
 Priority when backend=auto:
-  1) ESM-C  (package `esm`, EvolutionaryScale)  — recommended representation model
-  2) ESM-2  (package `fair-esm` / `esm.pretrained`) — common literature baseline
-  3) handcrafted AAC + DPC + simple physicochemical props
+  1) ESM-C  (package `esm`, EvolutionaryScale)
+  2) ESM-2  (package `fair-esm` / `esm.pretrained`)
+  3) handcrafted AAC + DPC + physicochemical props
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from tqdm import tqdm
 
+from .progress import progress
 from .utils import ensure_dir
 
 BackendName = Literal["esmc", "esm2", "handcrafted"]
@@ -24,7 +24,6 @@ BackendName = Literal["esmc", "esm2", "handcrafted"]
 AA = "ACDEFGHIKLMNPQRSTVWY"
 AA_INDEX = {a: i for i, a in enumerate(AA)}
 
-# rough side-chain hydrophobicity (Kyte-Doolittle-ish, scaled)
 HYDRO = {
     "A": 1.8, "C": 2.5, "D": -3.5, "E": -3.5, "F": 2.8,
     "G": -0.4, "H": -3.2, "I": 4.5, "K": -3.9, "L": 3.8,
@@ -43,11 +42,8 @@ def _cache_key(seqs: list[str], tag: str) -> str:
     return h.hexdigest()[:16]
 
 
-# ---------------------------------------------------------------------------
-# Handcrafted
-# ---------------------------------------------------------------------------
 def handcrafted_features(seqs: list[str]) -> np.ndarray:
-    """AAC (20) + DPC (400) + props (6) = 426-d."""
+    """AAC (20) + DPC (400) + props (6) = 426-d. No extra deps."""
     rows = []
     for seq in seqs:
         n = max(len(seq), 1)
@@ -63,28 +59,36 @@ def handcrafted_features(seqs: list[str]) -> np.ndarray:
                 a, b = seq[i], seq[i + 1]
                 if a in AA_INDEX and b in AA_INDEX:
                     dpc[AA_INDEX[a] * 20 + AA_INDEX[b]] += 1
-            dpc /= (len(seq) - 1)
+            dpc /= len(seq) - 1
 
-        hydro = np.mean([HYDRO.get(c, 0.0) for c in seq])
-        charge = np.sum([CHARGE.get(c, 0.0) for c in seq])
-        mw_proxy = float(n)  # length as simple size proxy
+        hydro = float(np.mean([HYDRO.get(c, 0.0) for c in seq]))
+        charge = float(np.sum([CHARGE.get(c, 0.0) for c in seq]))
         aromatic = sum(c in "FWY" for c in seq) / n
         positive = sum(c in "KRH" for c in seq) / n
         hydrophobic = sum(c in "AILMFVW" for c in seq) / n
-        props = np.array([hydro, charge, mw_proxy, aromatic, positive, hydrophobic], dtype=np.float64)
+        props = np.array(
+            [hydro, charge, float(n), aromatic, positive, hydrophobic],
+            dtype=np.float64,
+        )
         rows.append(np.concatenate([aac, dpc, props]))
     return np.vstack(rows).astype(np.float32)
 
 
-# ---------------------------------------------------------------------------
-# ESM-C
-# ---------------------------------------------------------------------------
 def _esmc_available() -> bool:
     try:
         from esm.models.esmc import ESMC  # noqa: F401
         from esm.sdk.api import ESMProtein, LogitsConfig  # noqa: F401
 
         return True
+    except Exception:
+        return False
+
+
+def _esm2_available() -> bool:
+    try:
+        import esm
+
+        return hasattr(esm, "pretrained")
     except Exception:
         return False
 
@@ -100,6 +104,7 @@ def embed_esmc(
     api_url: str = "https://forge.evolutionaryscale.ai",
     api_token: str | None = None,
 ) -> np.ndarray:
+    import torch
     from esm.sdk.api import ESMProtein, LogitsConfig
 
     if use_api:
@@ -120,11 +125,10 @@ def embed_esmc(
         client = ESMC.from_pretrained(model_name).to(device)
         client.eval()
 
-    import torch
-
     vecs: list[np.ndarray] = []
-    for i in tqdm(range(0, len(seqs), batch_size), desc=f"ESM-C[{model_name}]"):
-        batch = seqs[i : i + batch_size]
+    n_batches = (len(seqs) + batch_size - 1) // batch_size
+    for bi in progress(range(n_batches), desc=f"ESM-C[{model_name}]", total=n_batches):
+        batch = seqs[bi * batch_size : (bi + 1) * batch_size]
         for seq in batch:
             protein = ESMProtein(sequence=seq)
             protein_tensor = client.encode(protein)
@@ -139,39 +143,21 @@ def embed_esmc(
                 emb_np = emb.detach().float().cpu().numpy()
             else:
                 emb_np = np.asarray(emb, dtype=np.float32)
-            # shapes: [1, L+special, D] or [L+special, D] or [1, D]
             emb_np = np.squeeze(emb_np)
             if emb_np.ndim == 1:
                 vec = emb_np
             else:
-                # drop BOS/EOS if present (common: first/last)
-                if emb_np.shape[0] >= 3:
-                    tok = emb_np[1:-1]
-                else:
-                    tok = emb_np
+                tok = emb_np[1:-1] if emb_np.shape[0] >= 3 else emb_np
                 if pooling == "cls":
                     vec = emb_np[0]
                 elif pooling == "mean+max":
                     vec = np.concatenate([tok.mean(0), tok.max(0)], axis=0)
                 else:
                     vec = tok.mean(0)
-            vecs.append(vec.astype(np.float32))
-        if device.startswith("cuda"):
+            vecs.append(np.asarray(vec, dtype=np.float32))
+        if str(device).startswith("cuda"):
             torch.cuda.empty_cache()
     return np.vstack(vecs)
-
-
-# ---------------------------------------------------------------------------
-# ESM-2 (fair-esm)
-# ---------------------------------------------------------------------------
-def _esm2_available() -> bool:
-    try:
-        import esm  # fair-esm also exports `esm`
-
-        # fair-esm has pretrained; EvolutionaryScale esm may not
-        return hasattr(esm, "pretrained")
-    except Exception:
-        return False
 
 
 def embed_esm2(
@@ -182,8 +168,8 @@ def embed_esm2(
     batch_size: int = 8,
     pooling: str = "mean",
 ) -> np.ndarray:
-    import torch
     import esm
+    import torch
 
     model, alphabet = esm.pretrained.load_model_and_alphabet(model_name)
     model = model.to(device).eval()
@@ -191,16 +177,16 @@ def embed_esm2(
     repr_layers = [repr_layer]
 
     vecs: list[np.ndarray] = []
+    n_batches = (len(seqs) + batch_size - 1) // batch_size
     with torch.no_grad():
-        for i in tqdm(range(0, len(seqs), batch_size), desc=f"ESM-2[{model_name}]"):
-            batch_seqs = seqs[i : i + batch_size]
+        for bi in progress(range(n_batches), desc=f"ESM-2[{model_name}]", total=n_batches):
+            batch_seqs = seqs[bi * batch_size : (bi + 1) * batch_size]
             data = [(f"s{j}", s) for j, s in enumerate(batch_seqs)]
             _, _, tokens = batch_converter(data)
             tokens = tokens.to(device)
             out = model(tokens, repr_layers=repr_layers, return_contacts=False)
-            token_reps = out["representations"][repr_layer]  # [B, L, D]
+            token_reps = out["representations"][repr_layer]
             for b, seq in enumerate(batch_seqs):
-                # tokens: 0=BOS, 1..len=AA, len+1=EOS
                 rep = token_reps[b, 1 : len(seq) + 1]
                 if pooling == "cls":
                     vec = token_reps[b, 0].float().cpu().numpy()
@@ -210,13 +196,10 @@ def embed_esm2(
                     vec = np.concatenate([m, x], axis=0)
                 else:
                     vec = rep.mean(0).float().cpu().numpy()
-                vecs.append(vec.astype(np.float32))
+                vecs.append(np.asarray(vec, dtype=np.float32))
     return np.vstack(vecs)
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 def detect_backend(preferred: str = "auto") -> BackendName:
     if preferred and preferred != "auto":
         return preferred  # type: ignore[return-value]
@@ -234,9 +217,6 @@ def extract_features(
     cache_dir: str | Path | None = None,
     **kwargs,
 ) -> tuple[np.ndarray, BackendName, dict]:
-    """
-    Returns (X, backend_used, meta).
-    """
     used = detect_backend(backend)
     meta: dict = {"backend_requested": backend, "backend_used": used, "n": len(seqs)}
 
@@ -254,31 +234,39 @@ def extract_features(
 
     if used == "esmc":
         if not _esmc_available() and not kwargs.get("use_api"):
-            print("[features] ESM-C not importable → fallback")
+            print("[features] ESM-C not importable → try esm2")
             return extract_features(seqs, backend="esm2", device=device, cache_dir=cache_dir, **kwargs)
-        X = embed_esmc(
-            seqs,
-            model_name=kwargs.get("model_name", kwargs.get("esmc_model", "esmc_300m")),
-            device=device,
-            batch_size=int(kwargs.get("batch_size", 8)),
-            pooling=kwargs.get("pooling", "mean"),
-            use_api=bool(kwargs.get("use_api", False)),
-            api_model=kwargs.get("api_model", "esmc-300m-2024-12"),
-            api_url=kwargs.get("api_url", "https://forge.evolutionaryscale.ai"),
-            api_token=kwargs.get("api_token"),
-        )
+        try:
+            X = embed_esmc(
+                seqs,
+                model_name=kwargs.get("model_name", kwargs.get("esmc_model", "esmc_300m")),
+                device=device,
+                batch_size=int(kwargs.get("batch_size", 8)),
+                pooling=kwargs.get("pooling", "mean"),
+                use_api=bool(kwargs.get("use_api", False)),
+                api_model=kwargs.get("api_model", "esmc-300m-2024-12"),
+                api_url=kwargs.get("api_url", "https://forge.evolutionaryscale.ai"),
+                api_token=kwargs.get("api_token"),
+            )
+        except Exception as e:
+            print(f"[features] ESM-C failed ({e}) → try esm2")
+            return extract_features(seqs, backend="esm2", device=device, cache_dir=cache_dir, **kwargs)
     elif used == "esm2":
         if not _esm2_available():
             print("[features] ESM-2 not importable → handcrafted")
             return extract_features(seqs, backend="handcrafted", device=device, cache_dir=cache_dir, **kwargs)
-        X = embed_esm2(
-            seqs,
-            model_name=kwargs.get("esm2_model", kwargs.get("model_name", "esm2_t12_35M_UR50D")),
-            repr_layer=int(kwargs.get("repr_layer", 12)),
-            device=device,
-            batch_size=int(kwargs.get("batch_size", 8)),
-            pooling=kwargs.get("pooling", "mean"),
-        )
+        try:
+            X = embed_esm2(
+                seqs,
+                model_name=kwargs.get("esm2_model", kwargs.get("model_name", "esm2_t12_35M_UR50D")),
+                repr_layer=int(kwargs.get("repr_layer", 12)),
+                device=device,
+                batch_size=int(kwargs.get("batch_size", 8)),
+                pooling=kwargs.get("pooling", "mean"),
+            )
+        except Exception as e:
+            print(f"[features] ESM-2 failed ({e}) → handcrafted")
+            return extract_features(seqs, backend="handcrafted", device=device, cache_dir=cache_dir, **kwargs)
     else:
         X = handcrafted_features(seqs)
         used = "handcrafted"
