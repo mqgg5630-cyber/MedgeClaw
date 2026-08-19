@@ -3,6 +3,9 @@
 
 # 数据目录（用户输入数据 + 任务输出）
 data/
+# 教程内嵌 demo 数据需要入库
+!tutorials/**/data/
+!tutorials/**/data/**/
 
 # 共享输出目录（已废弃，保留兼容）
 outputs/
